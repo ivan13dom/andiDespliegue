@@ -34,51 +34,53 @@ def crear_tabla_votos():
 crear_tabla_votos()
 
 
-@app.route("/voto")
-def voto():
-    """
-    Esta ruta recibe los clicks desde el mail:
-      /voto?sucursal=MI_SUCURSAL&respuesta=si o no&envio=NUMERO_DE_ENVIO
-    
-    1) Guarda el voto (sin comentario todavía).
-    2) Si la respuesta fue "si", muestra el formulario de comentarios.
-       Si fue "no", muestra la página gracias_no.html.
-    """
-    # 1) Tomamos headers e IP
-    user_agent = request.headers.get("User-Agent", "")
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    if ip:
-        # Si viene un string con comas, solo tomamos la primera
-        ip = ip.split(",")[0].strip()
+@app.route("/comentario", methods=["POST"])
+def comentario():
+    comentario = request.form.get("comentario")
+    envio     = request.form.get("envio")
+    ip        = request.form.get("ip")
 
-    # 2) Parámetros en la URL
-    sucursal = request.args.get("sucursal")
-    respuesta = request.args.get("respuesta")
-    envio = request.args.get("envio")
+    if not (envio and ip):
+        return "Datos incompletos", 400
 
-    # 3) Verificamos que tengamos lo mínimo
-    if not sucursal or not respuesta or not envio:
-        return "Datos incompletos en la URL", 400
-
-    # 4) Timestamp en zona Argentina
-    timestamp = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
-
-    # 5) Insertamos el voto sin comentario (comentario NULL por ahora)
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO votos (timestamp, sucursal, envio, respuesta, ip, comentario)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (timestamp, sucursal, envio, respuesta, ip, None)
-        )
-        conn.commit()
+
+        # 1) Busco el ID del voto más reciente para este envío+IP
+        cur.execute("""
+            SELECT id
+            FROM votos
+            WHERE envio = %s
+              AND ip = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (envio, ip))
+        fila = cur.fetchone()
+
+        if fila:
+            voto_id = fila[0]
+            # 2) Actualizo ese registro en particular
+            cur.execute("""
+                UPDATE votos
+                SET comentario = %s
+                WHERE id = %s
+            """, (comentario, voto_id))
+            conn.commit()
+        # si no existe ningún registro con ese envío/IP, podés decidir devolver un error
+        else:
+            cur.close()
+            conn.close()
+            return "No se encontró el voto para actualizar.", 404
+
         cur.close()
         conn.close()
+        return "¡Gracias por tu comentario!"
+
     except Exception as e:
-        return f"Error al guardar el voto: {e}", 500
+        return f"Error al guardar el comentario: {e}", 500
+
+
 
     # 6) Si el usuario seleccionó "si", lo enviamos al formulario de comentarios
     if respuesta.lower() == "si":
