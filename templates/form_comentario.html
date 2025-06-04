@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>¡Gracias por tu respuesta!</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f2f2f2;
+            text-align: center;
+            padding: 50px;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            display: inline-block;
+            max-width: 500px;
+        }
+        h1 {
+            color: #d71920;
+        }
+        p {
+            color: #333;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            margin-top: 15px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+        button {
+            background-color: #d71920;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            margin-top: 10px;
+            cursor: pointer;
+            font-size: 15px;
+        }
+        button:hover {
+            background-color: #b4161a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+
+        <form action="/comentario" method="POST">
+            <label for="comentario"><strong>¿Querés contarnos algo mas sobre tu experiencia?</strong></label>
+            <textarea name="comentario" rows="4" placeholder="Escribí tu comentario aquí (opcional)..."></textarea>
+            <input type="hidden" name="envio" value="{{ envio }}">
+            <input type="hidden" name="ip" value="{{ ip }}">
+            <button type="submit">Enviar comentario</button>
+        </form>
+    </div>
+</body>
+</html>
