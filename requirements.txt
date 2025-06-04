@@ -1,3 +1,2 @@
-Flask>
+flask
 psycopg2-binary
-gunicorn
