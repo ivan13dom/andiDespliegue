@@ -10,7 +10,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "andreani-secret-key")
 
 # --- Definimos la URL de Postgres (Render inyecta DATABASE_URL automáticamente)
-DATABASE_URL = os.environ["DATABASE_URL"]
+DATABASE_URL = os.environ["postgresql://andi_db_8krs_user:yrQT3Ri6M7qEhNxK56Dn3M9adHsDHYlw@dpg-d105icbipnbc738husd0-a/andi_db_8krs"]
 
 # --- Creamos la tabla votos si no existe
 def crear_tabla_votos():
