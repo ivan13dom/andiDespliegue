@@ -1,1 +1,0 @@
-# votacion-hotsale
