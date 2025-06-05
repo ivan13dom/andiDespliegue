@@ -1,3 +1,7 @@
+# =============================================================================
+# app.py
+# =============================================================================
+
 from flask import Flask, render_template, request, redirect, Response
 import psycopg2
 import os
@@ -10,61 +14,79 @@ import logging
 
 app = Flask(__name__)
 
-# → Configuración mínima de logging para ver intentos en la consola
+# -------------------------------------------------------------------------
+# Configuración mínima de logging para ver eventos en consola
+# -------------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# → URL a la base de datos PostgreSQL (Render inyecta automáticamente DATABASE_URL en tu entorno)
+
+# -------------------------------------------------------------------------
+# LEER y VALIDAR la variable de entorno DATABASE_URL (postgres en Render)
+# -------------------------------------------------------------------------
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError("La variable de entorno DATABASE_URL no está definida")
+    raise RuntimeError("❌ La variable de entorno DATABASE_URL no está definida.")
 
 
-
-# ──> Creamos la tabla “votos” si no existe aún <──────────────────────────────────────────────────────
+# -------------------------------------------------------------------------
+# Función que crea la tabla "votos" si aún no existe
+# -------------------------------------------------------------------------
 def crear_tabla_votos():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS votos (
-            id SERIAL PRIMARY KEY,
-            timestamp TIMESTAMPTZ NOT NULL,
-            sucursal   TEXT  NOT NULL,
-            envio      TEXT  NOT NULL,
-            respuesta  TEXT  NOT NULL,
-            ip         TEXT  NOT NULL,
-            comentario TEXT
+            id          SERIAL PRIMARY KEY,
+            timestamp   TIMESTAMPTZ NOT NULL,
+            sucursal    TEXT  NOT NULL,
+            envio       TEXT  NOT NULL,
+            respuesta   TEXT  NOT NULL,
+            ip          TEXT  NOT NULL,
+            comentario  TEXT
         );
     """)
     conn.commit()
     cur.close()
     conn.close()
 
-# Llamamos a la creación de la tabla al iniciar
+# Llamamos a la creación de la tabla al iniciar la app
 crear_tabla_votos()
 
 
 
-# ──> Ruta raíz “/” (solo para verificar que el servidor esté vivo) <──────────────────────────────────────────
+# =============================================================================
+# RUTA: GET /
+#   Simple “ping” para verificar que el servidor esté vivo
+# =============================================================================
 @app.route("/")
 def home():
     return "Servidor activo"
 
 
 
-# ──> Endpoint GET “/voto”  
-# Recibe los parámetros de_QUERY_:
-#   - sucursal
-#   - respuesta   (se espera “si” o “no”)
-#   - envio      (número de envío)
-# → Inserta la fila en la tabla “votos”
-# → Si respuesta == “si” → muestra el formulario de comentarios
-#   sino → muestra la página de “gracias_no.html”
+# =============================================================================
+# RUTA: GET /voto
+#
+#   Parámetros en query string:
+#     - sucursal   (p.ej. "PALERMO")
+#     - respuesta  ("si" o "no")
+#     - envio      (número de envío, p.ej. "360002580979850")
+#
+#   Lo que hace:
+#     1) Inserta un nuevo registro en la tabla votos con esos datos + IP del cliente.
+#     2) Si respuesta == "si", muestra el template para pedir un comentario 
+#         (form_comentario.html)   ← pasándole envio e ip como hidden.
+#        Si respuesta == "no", muestra directamente “gracias_no.html”.
+#
+#   Ejemplo de URL:
+#     /voto?sucursal=PALERMO&respuesta=si&envio=12345ABC
+# =============================================================================
 @app.route("/voto")
 def voto():
-    # Recuperamos datos de la query string 
+    # — Recuperar parámetros desde la query string — 
     raw_query = request.query_string.decode()
     if ";" in raw_query and "&" not in raw_query:
-        # Caso en que venga con punto y coma en lugar de ampersand (adaptación genérica)
+        # Caso en que vengan separados por punto y coma: "sucursal=SUC;respuesta=si;envio=XXX"
         params = parse_qs(raw_query.replace(";", "&"))
         sucursal = params.get("sucursal", [None])[0]
         respuesta = params.get("respuesta", [None])[0]
@@ -74,18 +96,18 @@ def voto():
         respuesta = request.args.get("respuesta")
         envio = request.args.get("envio")
 
-    # Capturamos IP real (si está detrás de un proxy, X-Forwarded-For)
+    # — Obtener IP real (X-Forwarded-For o request.remote_addr) —
     ip_full = request.headers.get("X-Forwarded-For", request.remote_addr)
     ip = ip_full.split(",")[0].strip() if ip_full else None
 
-    # Si falta alguno de los tres datos, devolvemos 400
+    # Validar que exista al menos sucursal, respuesta, envio e IP
     if not (sucursal and respuesta and envio and ip):
         return "Datos incompletos", 400
 
-    # Timestamp en zona Argentina
+    # Obtener timestamp en zona Argentina
     timestamp = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
 
-    # Insertamos el voto (comentario vacío por defecto)
+    # Insertar en la base de datos (comentario vacío por defecto)
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -100,22 +122,28 @@ def voto():
         logging.error(f"Error al insertar voto: {e}")
         return f"Error al guardar el voto: {e}", 500
 
-    # Si el usuario dijo “si” → mostramos formulario para comentario
+    # Si la respuesta fue “si”, mostramos el formulario de comentario
     if respuesta.strip().lower() == "si":
         return render_template("form_comentario.html", envio=envio, ip=ip)
-    else:
-        # Si “no” → mostramos la página de agradecimiento sin comentario
-        return render_template("gracias_no.html")
+
+    # Si fue “no”, simplemente mostramos la página de gracias_no.html
+    return render_template("gracias_no.html")
 
 
 
-# ──> Endpoint POST “/comentario”  
-# Recibe los campos:
-#   - comentario
-#   - envio
-#   - ip
-# Busca el voto más reciente con ese “envio + ip” y actualiza su columna `comentario`.
-# Luego muestra “gracias_tiempo.html”.
+# =============================================================================
+# RUTA: POST /comentario
+# 
+#   Parámetros recibidos en el formulario (form_comentario.html):
+#     - comentario
+#     - envio
+#     - ip
+#
+#   Lo que hace:
+#     1) Busca en la tabla votos el registro más reciente para ese (envio + ip).
+#     2) Actualiza solo la columna `comentario` de ese registro. 
+#     3) Muestra la página “gracias_tiempo.html”.
+# =============================================================================
 @app.route("/comentario", methods=["POST"])
 def comentario():
     comentario_text = request.form.get("comentario", "").strip()
@@ -129,7 +157,7 @@ def comentario():
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
-        # 1) Buscamos el ID del voto más reciente para este envío+IP
+        # 1) Obtener el ID del voto más reciente para ese par (envio + ip)
         cur.execute("""
             SELECT id
             FROM votos
@@ -147,7 +175,7 @@ def comentario():
 
         voto_id = row[0]
 
-        # 2) Hacemos update en ese ID concreto
+        # 2) Actualizar únicamente la columna comentario
         cur.execute("""
             UPDATE votos
                SET comentario = %s
@@ -156,16 +184,20 @@ def comentario():
         conn.commit()
         cur.close()
         conn.close()
-        return render_template("gracias_tiempo.html")
 
+        return render_template("gracias_tiempo.html")
     except Exception as e:
         logging.error(f"Error al guardar comentario: {e}")
         return f"Error al guardar el comentario: {e}", 500
 
 
 
-# ──> Endpoint GET “/descargar”  
-# Genera un CSV con TODO lo que hay en la tabla “votos”.
+# =============================================================================
+# RUTA: GET /descargar
+#
+#   Genera un CSV con todos los registros de la tabla `votos`.
+#   Devuelve el archivo como adjunto descargable.
+# =============================================================================
 @app.route("/descargar")
 def descargar():
     try:
@@ -176,24 +208,22 @@ def descargar():
         cur.close()
         conn.close()
 
-        # Creamos CSV en memoria
         import io
-        salida = io.StringIO()
-        writer = csv.writer(salida)
-        # Encabezado
+        csv_buffer = io.StringIO()
+        writer = csv.writer(csv_buffer)
+        # Escribir encabezado
         writer.writerow(["id", "timestamp", "sucursal", "envio", "respuesta", "ip", "comentario"])
-        for fila in rows:
-            _id, ts, suc, env, resp, ip_, comm = fila
-            # Formatear timestamp estilo “DD/MM/YYYY HH:MM:SS”
+        for _id, ts, suc, env, resp, ip_, comm in rows:
+            # Formatear timestamp si es datetime
             if isinstance(ts, datetime):
                 ts_str = ts.strftime("%d/%m/%Y %H:%M:%S")
             else:
                 ts_str = str(ts)
             writer.writerow([_id, ts_str, suc, env, resp, ip_, comm or ""])
-        salida.seek(0)
+        csv_buffer.seek(0)
 
         return Response(
-            salida.getvalue(),
+            csv_buffer.getvalue(),
             mimetype="text/csv",
             headers={"Content-Disposition": "attachment; filename=resultados_votos.csv"}
         )
@@ -203,8 +233,22 @@ def descargar():
 
 
 
-# ──> (Opcional) Endpoint GET “/dashboard”  
-# Este ejemplo, igual que entregamos antes, muestra un Dashboard muy básico:
+# =============================================================================
+# RUTA: GET /dashboard
+#
+#   1) Lee todos los votos de la tabla.
+#   2) Agrupa por “envio” para quedarse con un único voto por envío (el primero que aparezca).
+#   3) Calcula:
+#      • Top 10 de sucursales con más votos “si”. 
+#      • Total de votos por día (solo votos únicos).
+#      • Lista de los últimos 100 votos únicos (para tabla).
+#   4) Renderiza “dashboard.html” pasándole:
+#      - top_positivos   (lista de tuplas: [(sucursal, cantidad), ...])
+#      - votos_dia_ordenados (lista: [(fecha, total), ...])
+#      - ultimos_votos   (lista: [(envio, timestamp, sucursal, respuesta, comentario), ...])
+#      - labels          (lista de fechas como strings, para Chart.js)
+#      - data_total      (lista de totales por día, para Chart.js)
+# =============================================================================
 @app.route("/dashboard")
 def dashboard():
     try:
@@ -218,49 +262,66 @@ def dashboard():
         logging.error(f"Error al leer votos desde BD: {e}")
         return f"No se pudo leer votos: {e}", 500
 
-    # Quedarnos con un solo elemento por cada “envio” (el primero que encontremos)
+    # --------------------------------------------------
+    # 1) Construir diccionario { envio: (sucursal, respuesta, ts, comentario) }
+    # --------------------------------------------------
     votos_unicos = {}
     for sucursal, respuesta, envio, ts, comentario in votos:
         if envio not in votos_unicos:
             votos_unicos[envio] = (sucursal, respuesta, ts, comentario)
 
-    # 1) Top 10 sucursales con más votos “positivo”
+    # --------------------------------------------------
+    # 2) Calcular métricas
+    #    - Cuenta “si” por sucursal
+    #    - Votos únicos por día
+    #    - Últimos 100 votos únicos
+    # --------------------------------------------------
     positivos_por_sucursal = Counter()
-    # 2) Votos únicos por día
     votos_por_dia = defaultdict(int)
-    # 3) Últimos 100 votos únicos
     ultimos_votos = []
 
     for envio, (sucursal, respuesta, ts, comentario) in votos_unicos.items():
         if respuesta.strip().lower() == "si":
             positivos_por_sucursal[sucursal] += 1
+
         fecha = ts.date()
         votos_por_dia[fecha] += 1
         ultimos_votos.append((envio, ts, sucursal, respuesta, comentario))
 
-    # Ordenar voto por día
-    votos_dia_ordenados = sorted(votos_por_dia.items())  # [ (fecha, cantidad), ... ]
-    # Ordenar últimos 100 votos únicos por timestamp descendente
+    # --------------------------------------------------
+    # 3) Ordenar los resultados
+    # --------------------------------------------------
+    votos_dia_ordenados = sorted(votos_por_dia.items())  # [ (fecha, total), ... ]
     ultimos_votos = sorted(ultimos_votos, key=lambda x: x[1], reverse=True)[:100]
-
-    # Preparar etiquetas y datos para gráficas (Chart.js)
-    labels = [fecha.strftime("%Y-%m-%d") for fecha, _ in votos_dia_ordenados]
-    data_si = [votos_por_dia[fecha]["si"] if isinstance(votos_por_dia[fecha], dict) else 0 for fecha, votos_por_dia in votos_dia_ordenados]
-    # (**Nota**: si quieres desglosar “no” en otra serie, agrégalo a data_no. En este ejemplo solo gráfico totales.)
-
     top_positivos = sorted(positivos_por_sucursal.items(), key=lambda x: x[1], reverse=True)[:10]
 
+    # --------------------------------------------------
+    # 4) Preparar datos para Chart.js: 
+    #    labels = ["2025-06-01", "2025-06-02", …]
+    #    data_total = [ 5, 12, 8, ... ]  (totales por cada fecha)
+    # --------------------------------------------------
+    labels = [fecha.strftime("%Y-%m-%d") for fecha, _ in votos_dia_ordenados]
+    data_total = [cantidad for _, cantidad in votos_dia_ordenados]
+
+    # --------------------------------------------------
+    # 5) Render de la plantilla “dashboard.html”
+    # --------------------------------------------------
     return render_template(
         "dashboard.html",
         top_positivos=top_positivos,
         votos_dia=votos_dia_ordenados,
         ultimos_votos=ultimos_votos,
         labels=labels,
-        data_si=[votos_por_dia[fecha]["si"] for fecha, votos_por_dia in votos_dia_ordenados]
+        data_total=data_total
     )
 
 
 
+# =============================================================================
+# Finalmente: levantamos la app en el puerto que Render provea (o 10000 por defecto)
+# =============================================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
+    # debug=True para mostrar rastreo de error local, 
+    # pero en producción en Render se recomienda quitar debug
     app.run(host="0.0.0.0", port=port, debug=True)
