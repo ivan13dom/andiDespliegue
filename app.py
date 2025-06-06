@@ -10,46 +10,82 @@ import logging
 
 app = Flask(__name__)
 
-# ---------------------------------------------------
-# Configuración del logger:
-# ---------------------------------------------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-# ---------------------------------------------------
-# URL a la base de datos en Render (automáticamente inyectada).
-# ---------------------------------------------------
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# ---------------------------------------------------
-# Creamos la tabla 'votos' si no existe aún
-# ---------------------------------------------------
-def crear_tabla_votos():
-    conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS votos (
-            id SERIAL PRIMARY KEY,
-            timestamp TIMESTAMPTZ NOT NULL,
-            sucursal TEXT NOT NULL,
-            envio TEXT NOT NULL,
-            respuesta TEXT NOT NULL,    -- "si" o "no"
-            ip TEXT NOT NULL,
-            comentario TEXT            -- Comentario libre (opcional)
-        );
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
+# --- Asegúrate de tener la tabla 'votos' creada tal cual:
+#    id SERIAL PK, timestamp TIMESTAMPTZ, sucursal TEXT, envio TEXT, respuesta TEXT, ip TEXT, comentario TEXT
+#    (lo más sencillo es copiar la función crear_tabla_votos() que ya tenías).
 
-crear_tabla_votos()
+# --------------------------------------------------------------------------------
+# Endpoint /dashboard (versión “usar todos los registros” y nuevo armado de datos)
+# --------------------------------------------------------------------------------
+@app.route("/dashboard")
+def dashboard():
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        # Recuperamos todos los votos (sin filtrar duplicados)
+        cur.execute("SELECT sucursal, respuesta, envio, timestamp, comentario FROM votos ORDER BY timestamp;")
+        filas = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Error al leer votos en Dashboard: {e}")
+        return f"Error al leer votos en Dashboard: {e}", 500
 
+    # ----------------------------------------------------------------
+    # 1) Calcular Totales "Sí" vs "No" (para el gráfico de dona)
+    # ----------------------------------------------------------------
+    total_si = 0
+    total_no = 0
+    for suc, resp, envio, ts, com in filas:
+        if resp.strip().lower() == "si":
+            total_si += 1
+        else:
+            total_no += 1
 
-# ---------------------------------------------------
-# Ruta principal:
-# ---------------------------------------------------
-@app.route("/")
-def home():
-    return "Servidor activo"
+    # ----------------------------------------------------------------
+    # 2) Calcular VOTOS POR DÍA (solo total diario, sin distinguir sí/no)
+    # ----------------------------------------------------------------
+    votos_por_dia = defaultdict(int)
+    for suc, resp, envio, ts, com in filas:
+        fecha = ts.astimezone(ZoneInfo("America/Argentina/Buenos_Aires")).date()
+        votos_por_dia[fecha] += 1
+
+    fechas_ordenadas = sorted(votos_por_dia.keys())
+    labels_dias = [f.strftime("%Y-%m-%d") for f in fechas_ordenadas]
+    data_dias = [votos_por_dia[f] for f in fechas_ordenadas]
+
+    # ----------------------------------------------------------------
+    # 3) Top de sucursales por # de "SI"
+    # ----------------------------------------------------------------
+    si_por_sucursal = Counter()
+    for suc, resp, envio, ts, com in filas:
+        if resp.strip().lower() == "si":
+            si_por_sucursal[suc] += 1
+
+    top_si = sorted(si_por_sucursal.items(), key=lambda x: x[1], reverse=True)
+
+    # ----------------------------------------------------------------
+    # 4) Últimos 100 votos (sin filtrar duplicados), en orden descendente
+    # ----------------------------------------------------------------
+    ultimos_100 = sorted(
+        [(envio, ts, suc, resp.strip().lower(), com) for suc, resp, envio, ts, com in filas],
+        key=lambda x: x[1],
+        reverse=True
+    )[:100]
+
+    # ----------------------------------------------------------------
+    # Finalmente devolvemos al template todos estos datos:
+    # ----------------------------------------------------------------
+    return render_template("dashboard.html",
+                           total_si=total_si,
+                           total_no=total_no,
+                           labels_dias=labels_dias,
+                           data_dias=data_dias,
+                           top_si=top_si,
+                           ultimos_100=ultimos_100)
 
 
 # ---------------------------------------------------

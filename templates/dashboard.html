@@ -1,43 +1,52 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8" />
-    <title>Dashboard de Asistente Virtual</title>
+  <meta charset="UTF-8" />
+  <title>Dashboard: Asistente Virtual</title>
 
-    <!-- Bootstrap CSS (opcional, para estilizar tablas y botones) -->
-    <link 
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" 
-      rel="stylesheet"
-    />
+  <!-- Bootstrap CSS (opcional, para estilizar tablas y botones) -->
+  <link 
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" 
+    rel="stylesheet"
+  />
 
-    <style>
-      body {
-        background-color: #f8f9fa;
-        padding: 2rem;
-        font-family: 'Segoe UI', sans-serif;
-      }
-      h1, h2 {
-        margin-bottom: 1rem;
-      }
-      .table-wrapper {
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid #dee2e6;
-        border-radius: 0.5rem;
-        background: white;
-      }
-      .chart-container {
-        max-width: 100%;
-        margin-bottom: 2rem;
-        background: white;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 0 10px rgba(0,0,0,0.05);
-      }
-      .btn-download {
-        margin-bottom: 1.5rem;
-      }
-    </style>
+  <style>
+    body {
+      background-color: #f8f9fa;
+      padding: 2rem;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    h1, h2 {
+      margin-bottom: 1rem;
+    }
+    .chart-container {
+      background: white;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
+    }
+    .table-wrapper {
+      background: white;
+      border: 1px solid #dee2e6;
+      border-radius: 0.5rem;
+      max-height: 350px;
+      overflow-y: auto;
+      margin-bottom: 2rem;
+      box-shadow: 0 0 5px rgba(0,0,0,0.05);
+    }
+    .btn-download {
+      margin-bottom: 1.5rem;
+    }
+    .chart-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
+    }
+    .chart-half {
+      flex: 1 1 400px;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
@@ -52,30 +61,38 @@
       📥 Descargar todos los datos
     </a>
 
+    <div class="chart-row">
+      <!-- ---------- GRÁFICO 1: Dona Sí vs No ---------- -->
+      <div class="chart-half chart-container">
+        <h2>Proporción "Sí" / "No"</h2>
+        <canvas id="donaSiNo"></canvas>
+      </div>
 
-    <!-- Gráfico de líneas: Votos "Sí" vs "No" por día -->
-    <div class="chart-container">
-      <h2>Votos por Día</h2>
-      <canvas id="votosChart"></canvas>
+      <!-- ------- GRÁFICO 2: Votos por Día (barras) ------- -->
+      <div class="chart-half chart-container">
+        <h2>Votos por Día</h2>
+        <canvas id="barrasDias"></canvas>
+      </div>
     </div>
 
-
-    <!-- Tabla: Top de sucursales por # de "Sí" -->
+    <!-- ---------- TOP Sucursales (tabla) ---------- -->
     <div class="mb-5">
-      <h2>Top Sucursales (Personas que Usaron el Asistente Virtual)</h2>
+      <h2>Top Sucursales por "# de Sí"</h2>
       <div class="table-wrapper">
         <table class="table table-striped table-hover mb-0">
           <thead class="table-dark">
             <tr>
+              <th>Posición</th>
               <th>Sucursal</th>
               <th># de "Sí"</th>
             </tr>
           </thead>
           <tbody>
-            {% for sucursal, cantidad in top_si %}
+            {% for idx, (suc, cant) in enumerate(top_si, start=1) %}
               <tr>
-                <td>{{ sucursal }}</td>
-                <td>{{ cantidad }}</td>
+                <td>{{ idx }}</td>
+                <td>{{ suc }}</td>
+                <td>{{ cant }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -83,10 +100,9 @@
       </div>
     </div>
 
-
-    <!-- Tabla: Últimos 100 votos únicos -->
+    <!-- ---------- Últimos 100 Votos (tabla) ---------- -->
     <div class="mb-5">
-      <h2>Últimos 100 Votos Únicos</h2>
+      <h2>Últimos 100 Votos</h2>
       <div class="table-wrapper">
         <table class="table table-striped table-hover mb-0">
           <thead class="table-dark">
@@ -99,59 +115,79 @@
             </tr>
           </thead>
           <tbody>
-            {% for envio, timestamp, sucursal, respuesta, comentario in ultimos_votos %}
+            {% for envio, ts, suc, resp, com in ultimos_100 %}
               <tr>
                 <td>{{ envio }}</td>
-                <td>{{ timestamp.astimezone().strftime('%d/%m/%Y %H:%M') }}</td>
-                <td>{{ sucursal }}</td>
-                <td>{{ respuesta|capitalize }}</td>
-                <td>{{ comentario or "" }}</td>
+                <td>{{ ts.astimezone().strftime('%d/%m/%Y %H:%M') }}</td>
+                <td>{{ suc }}</td>
+                <td>{{ resp|capitalize }}</td>
+                <td>{{ com or '' }}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
-
   </div> <!-- /container -->
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    const ctx = document.getElementById('votosChart').getContext('2d');
+    // ---------- Datos desde el servidor ----------
+    const totalSi = {{ total_si }};
+    const totalNo = {{ total_no }};
+    const labelsDias = {{ labels_dias | tojson }};
+    const dataDias = {{ data_dias | tojson }};
 
-    const votosChart = new Chart(ctx, {
-      type: 'line',
+    // ---------- GRÁFICO 1: Dona Sí/No ----------
+    const ctxDona = document.getElementById('donaSiNo').getContext('2d');
+    new Chart(ctxDona, {
+      type: 'doughnut',
       data: {
-        labels: {{ labels | tojson }},       // ["2025-05-10", "2025-05-11", ...]
-        datasets: [
-          {
-            label: 'Votos "Sí"',
-            data: {{ data_si | tojson }},    // [5, 7, 2, ...]
-            borderColor: '#4CAF50',           // verde
-            backgroundColor: 'rgba(76, 175, 80, 0.2)',
-            tension: 0.3,
-            fill: true
-          },
-          {
-            label: 'Votos "No"',
-            data: {{ data_no | tojson }},    // [3, 1, 4, ...]
-            borderColor: '#F44336',           // rojo
-            backgroundColor: 'rgba(244, 67, 54, 0.2)',
-            tension: 0.3,
-            fill: true
-          }
-        ]
+        labels: ['Sí', 'No'],
+        datasets: [{
+          data: [ totalSi, totalNo ],
+          backgroundColor: ['#4CAF50', '#F44336'],
+          hoverOffset: 10
+        }]
       },
       options: {
         responsive: true,
         plugins: {
           legend: {
-            position: 'top'
+            position: 'bottom'
+          }
+        }
+      }
+    });
+
+    // ---------- GRÁFICO 2: Votos por Día (barras) ----------
+    const ctxBar = document.getElementById('barrasDias').getContext('2d');
+    new Chart(ctxBar, {
+      type: 'bar',
+      data: {
+        labels: labelsDias,
+        datasets: [{
+          label: 'Total de votos',
+          data: dataDias,
+          backgroundColor: 'rgba(54, 162, 235, 0.6)',
+          borderColor: 'rgba(54, 162, 235, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: {
+            title: { display: true, text: 'Fecha' }
+          },
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: 'Cantidad de votos' }
           }
         },
-        scales: {
-          y: { beginAtZero: true }
+        plugins: {
+          legend: { display: false }
         }
       }
     });
