@@ -2,153 +2,142 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8" />
-    <title>Dashboard ANDI – Uso de Asistente Virtual</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard de Asistente Virtual</title>
 
-    <!-- Bootstrap 5.3 CSS -->
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    <!-- Bootstrap CSS (opcional, para estilizar tablas y botones) -->
+    <link 
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" 
       rel="stylesheet"
-      integrity="sha384-XLrE96gP--Dbo+1QfYk3aMVgdfnUpykD1Gf8eHVNCEsKCpPX1XSPANnK7Sm2r9E"
-      crossorigin="anonymous"
     />
 
     <style>
       body {
         background-color: #f8f9fa;
-        font-family: 'Segoe UI', sans-serif;
         padding: 2rem;
+        font-family: 'Segoe UI', sans-serif;
       }
       h1, h2 {
         margin-bottom: 1rem;
-        color: #d71920; /* Rojo Andreani */
       }
       .table-wrapper {
-        max-height: 350px;
+        max-height: 400px;
         overflow-y: auto;
         border: 1px solid #dee2e6;
         border-radius: 0.5rem;
+        background: white;
       }
       .chart-container {
         max-width: 100%;
         margin-bottom: 2rem;
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 0 10px rgba(0,0,0,0.05);
+      }
+      .btn-download {
+        margin-bottom: 1.5rem;
       }
     </style>
 </head>
 <body>
   <div class="container">
-    <h1 class="mb-4">Dashboard – Uso de ANDI en Sucursales</h1>
+    <h1 class="mb-4">Dashboard: Uso del Asistente Virtual</h1>
 
-    <!-- GRÁFICO: Sí vs No por día -->
-    <div class="mb-5">
-      <h2>Usos de ANDI por Día</h2>
-      <canvas id="andiChart" class="chart-container"></canvas>
+    <!-- Botón para descargar todos los datos como CSV -->
+    <a 
+      href="/descargar" 
+      class="btn btn-primary btn-download"
+      target="_blank"
+    >
+      📥 Descargar todos los datos
+    </a>
+
+
+    <!-- Gráfico de líneas: Votos "Sí" vs "No" por día -->
+    <div class="chart-container">
+      <h2>Votos por Día</h2>
+      <canvas id="votosChart"></canvas>
     </div>
 
-    <!-- TOP 10 sucursales con más “Sí” -->
-    <div class="row mb-5">
-      <div class="col-md-6">
-        <h2>Top 10 – Cantidad de “Sí”</h2>
-        <div class="table-wrapper">
-          <table class="table table-striped table-hover">
-            <thead class="table-dark">
-              <tr>
-                <th>Sucursal</th>
-                <th>“Sí”</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for sucursal, cant in top_si %}
-              <tr>
-                <td>{{ sucursal }}</td>
-                <td>{{ cant }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-      <!-- TOP 5 sucursales con mayor % de “Sí” -->
-      <div class="col-md-6">
-        <h2>Top 5 – % de “Sí”</h2>
-        <div class="table-wrapper">
-          <table class="table table-striped table-hover">
-            <thead class="table-dark">
-              <tr>
-                <th>Sucursal</th>
-                <th>% “Sí”</th>
-                <th>Tot.</th>
-                <th>“Sí”</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for sucursal, pct, si_count, total in top_pct %}
-              <tr>
-                <td>{{ sucursal }}</td>
-                <td>{{ pct }} %</td>
-                <td>{{ total }}</td>
-                <td>{{ si_count }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- TABLA: Últimos 100 votos únicos -->
+    <!-- Tabla: Top de sucursales por # de "Sí" -->
     <div class="mb-5">
-      <h2>Últimos 100 Registros</h2>
+      <h2>Top Sucursales (Personas que Usaron el Asistente Virtual)</h2>
       <div class="table-wrapper">
-        <table class="table table-striped table-hover">
+        <table class="table table-striped table-hover mb-0">
           <thead class="table-dark">
             <tr>
-              <th># Envío</th>
-              <th>Fecha y Hora (AR)</th>
+              <th>Sucursal</th>
+              <th># de "Sí"</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sucursal, cantidad in top_si %}
+              <tr>
+                <td>{{ sucursal }}</td>
+                <td>{{ cantidad }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+
+    <!-- Tabla: Últimos 100 votos únicos -->
+    <div class="mb-5">
+      <h2>Últimos 100 Votos Únicos</h2>
+      <div class="table-wrapper">
+        <table class="table table-striped table-hover mb-0">
+          <thead class="table-dark">
+            <tr>
+              <th>Envío</th>
+              <th>Fecha</th>
               <th>Sucursal</th>
               <th>Respuesta</th>
               <th>Comentario</th>
             </tr>
           </thead>
           <tbody>
-            {% for envio, ts, suc, resp, comm in ultimos_votos %}
-            <tr>
-              <td>{{ envio }}</td>
-              <td>{{ ts.strftime("%d/%m/%Y %H:%M") }}</td>
-              <td>{{ suc }}</td>
-              <td>{{ resp|capitalize }}</td>
-              <td>{{ comm or "" }}</td>
-            </tr>
+            {% for envio, timestamp, sucursal, respuesta, comentario in ultimos_votos %}
+              <tr>
+                <td>{{ envio }}</td>
+                <td>{{ timestamp.astimezone().strftime('%d/%m/%Y %H:%M') }}</td>
+                <td>{{ sucursal }}</td>
+                <td>{{ respuesta|capitalize }}</td>
+                <td>{{ comentario or "" }}</td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
-  </div>
+
+  </div> <!-- /container -->
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    const ctx = document.getElementById("andiChart").getContext("2d");
-    new Chart(ctx, {
-      type: "line",
+    const ctx = document.getElementById('votosChart').getContext('2d');
+
+    const votosChart = new Chart(ctx, {
+      type: 'line',
       data: {
-        labels: {{ labels | tojson }},
+        labels: {{ labels | tojson }},       // ["2025-05-10", "2025-05-11", ...]
         datasets: [
           {
-            label: "Sí",
-            data: {{ data_si | tojson }},
-            borderColor: "#4CAF50",    // verde
-            backgroundColor: "rgba(76, 175, 80, 0.2)",
+            label: 'Votos "Sí"',
+            data: {{ data_si | tojson }},    // [5, 7, 2, ...]
+            borderColor: '#4CAF50',           // verde
+            backgroundColor: 'rgba(76, 175, 80, 0.2)',
             tension: 0.3,
             fill: true
           },
           {
-            label: "No",
-            data: {{ data_no | tojson }},
-            borderColor: "#F44336",    // rojo
-            backgroundColor: "rgba(244, 67, 54, 0.2)",
+            label: 'Votos "No"',
+            data: {{ data_no | tojson }},    // [3, 1, 4, ...]
+            borderColor: '#F44336',           // rojo
+            backgroundColor: 'rgba(244, 67, 54, 0.2)',
             tension: 0.3,
             fill: true
           }
@@ -157,13 +146,12 @@
       options: {
         responsive: true,
         plugins: {
-          legend: { position: "top" }
+          legend: {
+            position: 'top'
+          }
         },
         scales: {
-          y: {
-            beginAtZero: true,
-            precision: 0
-          }
+          y: { beginAtZero: true }
         }
       }
     });
