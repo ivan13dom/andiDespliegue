@@ -9,9 +9,10 @@ from collections import Counter, defaultdict
 import logging
 
 app = Flask(__name__)
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-DATABASE_URL = os.environ.get("DATABASE_URL")
+
 
 # --- Asegúrate de tener la tabla 'votos' creada tal cual:
 #    id SERIAL PK, timestamp TIMESTAMPTZ, sucursal TEXT, envio TEXT, respuesta TEXT, ip TEXT, comentario TEXT
@@ -22,70 +23,66 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # --------------------------------------------------------------------------------
 @app.route("/dashboard")
 def dashboard():
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cur = conn.cursor()
-        # Recuperamos todos los votos (sin filtrar duplicados)
-        cur.execute("SELECT sucursal, respuesta, envio, timestamp, comentario FROM votos ORDER BY timestamp;")
-        filas = cur.fetchall()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        logging.error(f"Error al leer votos en Dashboard: {e}")
-        return f"Error al leer votos en Dashboard: {e}", 500
+    conn = psycopg2.connect(DATABASE_URL)
+    cur  = conn.cursor()
 
-    # ----------------------------------------------------------------
-    # 1) Calcular Totales "Sí" vs "No" (para el gráfico de dona)
-    # ----------------------------------------------------------------
-    total_si = 0
-    total_no = 0
-    for suc, resp, envio, ts, com in filas:
-        if resp.strip().lower() == "si":
-            total_si += 1
-        else:
-            total_no += 1
+    # 1) Recuperar todos los registros
+    cur.execute("SELECT id, timestamp, sucursal, envio, respuesta, ip, comentario FROM votos")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
 
-    # ----------------------------------------------------------------
-    # 2) Calcular VOTOS POR DÍA (solo total diario, sin distinguir sí/no)
-    # ----------------------------------------------------------------
+    # 2) Variables para “Votos por Día”
     votos_por_dia = defaultdict(int)
-    for suc, resp, envio, ts, com in filas:
-        fecha = ts.astimezone(ZoneInfo("America/Argentina/Buenos_Aires")).date()
-        votos_por_dia[fecha] += 1
+    # 3) Variables para “Sí por Sucursal”
+    conteo_si_por_sucursal = Counter()
+    # 4) Contar total de respuestas y total de “Sí” / “No”
+    total_responses = len(rows)
+    total_si  = sum(1 for r in rows if r[4].strip().lower() == "si")
+    total_no  = total_responses - total_si
+    percent_si = (total_si / total_responses * 100) if total_responses > 0 else 0
 
-    fechas_ordenadas = sorted(votos_por_dia.keys())
-    labels_dias = [f.strftime("%Y-%m-%d") for f in fechas_ordenadas]
-    data_dias = [votos_por_dia[f] for f in fechas_ordenadas]
+    # 5) Determinar “Sucursal con más Sí”
+    #    (si no hay respuestas, dejar cadena vacía)
+    if total_si > 0:
+        for _id, ts, suc, envio, resp, ip, com in rows:
+            if resp.strip().lower() == "si":
+                conteo_si_por_sucursal[suc] += 1
+        top_branch_si = conteo_si_por_sucursal.most_common(1)[0][0]
+    else:
+        top_branch_si = ""
 
-    # ----------------------------------------------------------------
-    # 3) Top de sucursales por # de "SI"
-    # ----------------------------------------------------------------
-    si_por_sucursal = Counter()
-    for suc, resp, envio, ts, com in filas:
-        if resp.strip().lower() == "si":
-            si_por_sucursal[suc] += 1
+    # 6) Llenar votos_por_dia y sí por sucursal
+    for _id, ts, suc, envio, resp, ip, com in rows:
+        # ts viene como timestamp PostgreSQL (aware), lo normalizamos a zona AR
+        fecha_ar = ts.astimezone(ZoneInfo("America/Argentina/Buenos_Aires")).date()
+        votos_por_dia[fecha_ar] += 1
 
-    top_si = sorted(si_por_sucursal.items(), key=lambda x: x[1], reverse=True)
+    # 7) Preparar arrays “labels_dias” / “data_dias” ordenados cronológicamente
+    votos_dia_ordenados = sorted(votos_por_dia.items())  # [(fecha, count), ...]
+    labels_dias = [fecha.strftime("%Y-%m-%d") for fecha, _count in votos_dia_ordenados]
+    data_dias   = [count for _fecha, count in votos_dia_ordenados]
 
-    # ----------------------------------------------------------------
-    # 4) Últimos 100 votos (sin filtrar duplicados), en orden descendente
-    # ----------------------------------------------------------------
-    ultimos_100 = sorted(
-        [(envio, ts, suc, resp.strip().lower(), com) for suc, resp, envio, ts, com in filas],
-        key=lambda x: x[1],
-        reverse=True
-    )[:100]
+    # 8) Preparar arrays “bar_labels” / “bar_data” para “Sí por Sucursal”
+    bar_labels = [sucursal for sucursal, cnt in conteo_si_por_sucursal.most_common()]
+    bar_data   = [cnt for _sucursal, cnt in conteo_si_por_sucursal.most_common()]
 
-    # ----------------------------------------------------------------
-    # Finalmente devolvemos al template todos estos datos:
-    # ----------------------------------------------------------------
-    return render_template("dashboard.html",
-                           total_si=total_si,
-                           total_no=total_no,
-                           labels_dias=labels_dias,
-                           data_dias=data_dias,
-                           top_si=top_si,
-                           ultimos_100=ultimos_100)
+    # 9) La variable all_records será exactamente “rows”
+    all_records = rows
+
+    return render_template(
+        "dashboard.html",
+        total_responses=total_responses,
+        percent_si=percent_si,
+        top_branch_si=top_branch_si,
+        labels_dias=labels_dias,
+        data_dias=data_dias,
+        bar_labels=bar_labels,
+        bar_data=bar_data,
+        total_si=total_si,
+        total_no=total_no,
+        all_records=all_records
+    )
 
 
 # ---------------------------------------------------
